@@ -48,6 +48,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: "browser_find_links",
+      description:
+        "Collects all links from the current page and lists pages within the same domain",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sameDomainOnly: {
+            type: "boolean",
+            description: "Only list links within the same domain (default: true)",
+          },
+        },
+      },
+    },
+    {
       name: "browser_close",
       description: "Closes the browser and releases resources",
       inputSchema: {
@@ -176,6 +190,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (formAnalysis.length === 0) {
           report += `No forms found on this page.\n`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: report,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: ${error}`,
+            },
+          ],
+        };
+      }
+    }
+
+    case "browser_find_links": {
+      try {
+        if (!page) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Browser is not open. Use browser_navigate first.",
+              },
+            ],
+          };
+        }
+
+        const currentUrl = new URL(page.url());
+        const sameDomainOnly = args?.sameDomainOnly !== false;
+
+        const links = await page.evaluate(() => {
+          const anchors = document.querySelectorAll("a[href]");
+          return Array.from(anchors).map((a) => ({
+            href: a.getAttribute("href"),
+            text: a.textContent?.trim().substring(0, 50) || "no text",
+          }));
+        });
+
+        // Process and filter links
+        const processedLinks = links
+          .map((link) => {
+            try {
+              const url = new URL(link.href!, currentUrl.origin);
+              return { url: url.href, text: link.text, domain: url.hostname };
+            } catch {
+              return null;
+            }
+          })
+          .filter((link) => link !== null)
+          .filter((link) => !sameDomainOnly || link!.domain === currentUrl.hostname);
+
+        // Remove duplicates
+        const uniqueLinks = [
+          ...new Map(processedLinks.map((l) => [l!.url, l])).values(),
+        ];
+
+        let report = `Link Analysis\n`;
+        report += `Current Page: ${page.url()}\n`;
+        report += `Total Links Found: ${links.length}\n`;
+        report += `Same Domain Links: ${uniqueLinks.length}\n\n`;
+        report += `Discovered Pages:\n`;
+
+        uniqueLinks.slice(0, 30).forEach((link) => {
+          report += `  ${link!.text}\n  ${link!.url}\n\n`;
+        });
+
+        if (uniqueLinks.length > 30) {
+          report += `... and ${uniqueLinks.length - 30} more links\n`;
         }
 
         return {
