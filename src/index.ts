@@ -124,21 +124,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const url = page.url();
         const title = await page.title();
-        const html = await page.content();
 
-        // Get basic page statistics
-        const forms = await page.locator("form").count();
-        const inputs = await page.locator("input").count();
-        const links = await page.locator("a").count();
+        // Analyze forms in detail
+        const formAnalysis = await page.evaluate(() => {
+          const forms = document.querySelectorAll("form");
+          return Array.from(forms).map((form, index) => {
+            const inputs = form.querySelectorAll("input, textarea, select");
+            const inputDetails = Array.from(inputs).map((input) => ({
+              name: input.getAttribute("name") || "unnamed",
+              type: input.getAttribute("type") || input.tagName.toLowerCase(),
+              id: input.getAttribute("id") || "no-id",
+            }));
+
+            return {
+              formIndex: index,
+              action: form.getAttribute("action") || "current page",
+              method: form.getAttribute("method") || "GET",
+              inputCount: inputs.length,
+              inputs: inputDetails,
+            };
+          });
+        });
+
+        // Analyze URL parameters
+        const urlObj = new URL(url);
+        const urlParams = Array.from(urlObj.searchParams.entries());
+
+        // Build report
+        let report = `Page Analysis: ${title}\nURL: ${url}\n\n`;
+
+        if (urlParams.length > 0) {
+          report += `URL Parameters (${urlParams.length} found):\n`;
+          urlParams.forEach(([key, value]) => {
+            report += `  - ${key}: ${value}\n`;
+          });
+          report += `\n`;
+        }
+
+        report += `Form Analysis (${formAnalysis.length} forms found):\n\n`;
+
+        formAnalysis.forEach((form) => {
+          report += `Form #${form.formIndex + 1}:\n`;
+          report += `Action: ${form.action}\n`;
+          report += `Method: ${form.method.toUpperCase()}\n`;
+          report += `Input Fields (${form.inputCount} fields):\n`;
+          form.inputs.forEach((input) => {
+            report += `  - ${input.name} (${input.type})\n`;
+          });
+          report += `\n`;
+        });
+
+        if (formAnalysis.length === 0) {
+          report += `No forms found on this page.\n`;
+        }
 
         return {
           content: [
             {
               type: "text",
-              text:
-                `Page Information:\n\nURL: ${url}\nTitle: ${title}\n\n` +
-                `Page Statistics:\n- Forms: ${forms}\n- Inputs: ${inputs}\n- Links: ${links}\n\n` +
-                `HTML content (first 2000 characters):\n${html.substring(0, 2000)}...`,
+              text: report,
             },
           ],
         };
